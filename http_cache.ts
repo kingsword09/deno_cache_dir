@@ -3,10 +3,9 @@
 import { isAbsolute } from "@std/path";
 import { assert } from "./util.ts";
 import {
-  type GlobalHttpCache,
-  instantiate,
-  type LocalHttpCache,
-} from "./lib/deno_cache_dir.generated.js";
+  GlobalHttpCache,
+  LocalHttpCache,
+} from "./lib/deno_cache_dir.js";
 
 export interface HttpCacheCreateOptions {
   root: string;
@@ -47,7 +46,6 @@ export class HttpCache implements Disposable {
         "Vendor root must be an absolute path.",
       );
     }
-    const { GlobalHttpCache, LocalHttpCache } = await instantiate();
 
     let cache: LocalHttpCache | GlobalHttpCache;
     if (options.vendorRoot != null) {

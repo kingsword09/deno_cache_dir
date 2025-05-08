@@ -33,6 +33,10 @@ pub use global::GlobalHttpCacheRc;
 pub use local::LocalHttpCache;
 pub use local::LocalHttpCacheRc;
 pub use local::LocalLspHttpCache;
+pub use npm::mixed_case_package_name_decode;
+pub use npm::mixed_case_package_name_encode;
+pub use npm::NpmCacheDir;
+pub use npm::NpmCacheFolderId;
 
 #[cfg(feature = "wasm")]
 pub mod wasm {
@@ -177,6 +181,11 @@ pub mod wasm {
     }
   }
 
+  #[wasm_bindgen]
+  pub struct ReadOnlyNpmCache {
+    
+  }
+  
   fn get_headers<Cache: HttpCache>(
     cache: &Cache,
     url: &str,

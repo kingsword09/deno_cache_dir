@@ -1,4 +1,7 @@
 .vscode
 /target
 lib/snippets
-lib/deno_cache_dir.generated.js
+lib/deno_cache_dir.d.ts
+lib/deno_cache_dir.internal.js
+lib/deno_cache_dir.js
+lib/deno_cache_dir.wasm
