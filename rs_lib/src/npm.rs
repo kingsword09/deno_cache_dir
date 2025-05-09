@@ -17,6 +17,8 @@ pub struct NpmCacheFolderId {
   pub version: String,
   /// Package copy index.
   pub copy_index: u8,
+  /// Package registry url.
+  pub registry_url: String,
 }
 
 /// The global cache directory of npm packages.
@@ -124,74 +126,57 @@ impl NpmCacheDir {
     &self,
     specifier: &Url,
   ) -> Option<NpmCacheFolderId> {
-    let mut maybe_relative_url = None;
-
-    // Iterate through known registries and try to get a match.
+    // Try to find matching registry and parse package info
     for registry_dirname in &self.known_registries_dirnames {
       let registry_root_dir = self
         .root_dir_url
         .join(&format!("{}/", registry_dirname))
-        // this not succeeding indicates a fatal issue, so unwrap
         .unwrap();
 
-      let Some(relative_url) = registry_root_dir.make_relative(specifier)
-      else {
-        continue;
+      // Get relative path from registry root to package
+      let relative_url = match registry_root_dir.make_relative(specifier) {
+        Some(url) if !url.starts_with("../") => url,
+        _ => continue,
       };
 
-      if relative_url.starts_with("../") {
-        continue;
-      }
-
-      maybe_relative_url = Some(relative_url);
-      break;
-    }
-
-    let mut relative_url = maybe_relative_url?;
-
-    // base32 decode the url if it starts with an underscore
-    // * Ex. _{base32(package_name)}/
-    if let Some(end_url) = relative_url.strip_prefix('_') {
-      let mut parts = end_url
-        .split('/')
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-      match mixed_case_package_name_decode(&parts[0]) {
-        Some(part) => {
-          parts[0] = part;
-        }
-        None => return None,
-      }
-      relative_url = parts.join("/");
-    }
-
-    // examples:
-    // * chalk/5.0.1/
-    // * @types/chalk/5.0.1/
-    // * some-package/5.0.1_1/ -- where the `_1` (/_\d+/) is a copy of the folder for peer deps
-    let is_scoped_package = relative_url.starts_with('@');
-    let mut parts = relative_url
-      .split('/')
-      .enumerate()
-      .take(if is_scoped_package { 3 } else { 2 })
-      .map(|(_, part)| part)
-      .collect::<Vec<_>>();
-    if parts.len() < 2 {
-      return None;
-    }
-    let version_part = parts.pop().unwrap();
-    let name = parts.join("/");
-    let (version, copy_index) =
-      if let Some((version, copy_count)) = version_part.split_once('_') {
-        (version, copy_count.parse::<u8>().ok()?)
+      // Handle base32 encoded package names
+      let relative_url = if let Some(end_url) = relative_url.strip_prefix('_') {
+        let mut parts: Vec<String> = end_url.split('/').map(String::from).collect();
+        parts[0] = mixed_case_package_name_decode(&parts[0])?;
+        parts.join("/")
       } else {
-        (version_part, 0)
+        relative_url
       };
-    Some(NpmCacheFolderId {
-      name,
-      version: version.to_string(),
-      copy_index,
-    })
+
+      // Parse package name and version
+      let is_scoped = relative_url.starts_with('@');
+      let parts: Vec<_> = relative_url
+        .split('/')
+        .take(if is_scoped { 3 } else { 2 })
+        .collect();
+      
+      if parts.len() < 2 {
+        continue;
+      }
+
+      let version_part = parts.last().unwrap();
+      let name = parts[..parts.len()-1].join("/");
+
+      // Parse version and copy index
+      let (version, copy_index) = match version_part.split_once('_') {
+        Some((ver, idx)) => (ver, idx.parse::<u8>().ok()?),
+        None => (*version_part, 0),
+      };
+
+      return Some(NpmCacheFolderId {
+        name,
+        version: version.to_string(),
+        copy_index,
+        registry_url: relative_url,
+      });
+    }
+
+    None
   }
 
   pub fn get_cache_location(&self) -> PathBuf {

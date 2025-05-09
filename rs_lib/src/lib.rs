@@ -33,8 +33,6 @@ pub use global::GlobalHttpCacheRc;
 pub use local::LocalHttpCache;
 pub use local::LocalHttpCacheRc;
 pub use local::LocalLspHttpCache;
-pub use npm::mixed_case_package_name_decode;
-pub use npm::mixed_case_package_name_encode;
 pub use npm::NpmCacheDir;
 pub use npm::NpmCacheFolderId;
 
@@ -183,9 +181,139 @@ pub mod wasm {
 
   #[wasm_bindgen]
   pub struct ReadOnlyNpmCache {
-    
+    cache: crate::npm::NpmCacheDir,
   }
-  
+
+  impl Default for ReadOnlyNpmCache {
+    fn default() -> Self {
+      Self::from_deno_dir(None)
+    }
+  }
+
+  #[wasm_bindgen]
+  impl ReadOnlyNpmCache {
+    pub fn new(
+      root_dir: &str,
+      known_registries_dirnames: Option<Vec<String>>,
+    ) -> Self {
+      let sys = RealSys;
+      let known_registries_dirnames = match known_registries_dirnames {
+        Some(known_registries_dirnames) => known_registries_dirnames
+          .iter()
+          .map(|registry_url| Url::parse(&registry_url).unwrap())
+          .collect(),
+        None => vec![Url::parse("https://registry.npmjs.org/").unwrap()],
+      };
+      let cache = crate::npm::NpmCacheDir::new::<RealSys>(
+        &sys,
+        PathBuf::from(root_dir),
+        known_registries_dirnames,
+      );
+
+      Self { cache }
+    }
+
+    #[wasm_bindgen]
+    pub fn from_deno_dir(
+      known_registries_dirnames: Option<Vec<String>>,
+    ) -> Self {
+      let root_dir = resolve_deno_dir(None).unwrap();
+      Self::new(
+        PathBuf::from(root_dir).join("npm").to_str().unwrap(),
+        known_registries_dirnames,
+      )
+    }
+
+    #[wasm_bindgen]
+    pub fn get_cache_location(&self) -> Result<String, JsValue> {
+      Ok(
+        self
+          .cache
+          .get_cache_location()
+          .to_string_lossy()
+          .to_string(),
+      )
+    }
+
+    #[wasm_bindgen]
+    pub fn resolve_package_folder_id_from_specifier(
+      &self,
+      specifier: &str,
+    ) -> Result<JsValue, JsValue> {
+      let specifier = parse_url(specifier).map_err(as_js_error)?;
+
+      if let Some(npm_cache_folder_id) = self
+        .cache
+        .resolve_package_folder_id_from_specifier(&specifier)
+      {
+        let obj = Object::new();
+        Reflect::set(
+          &obj,
+          &JsValue::from_str("name"),
+          &JsValue::from_str(&npm_cache_folder_id.name),
+        )
+        .unwrap();
+        Reflect::set(
+          &obj,
+          &JsValue::from_str("version"),
+          &JsValue::from_str(&npm_cache_folder_id.version),
+        )
+        .unwrap();
+        Reflect::set(
+          &obj,
+          &JsValue::from_str("copy_index"),
+          &JsValue::from(npm_cache_folder_id.copy_index),
+        )
+        .unwrap();
+
+        Ok(obj.into())
+      } else {
+        Ok(JsValue::undefined())
+      }
+    }
+
+    #[wasm_bindgen]
+    pub fn package_folder_for_id(
+      &self,
+      package_name: &str,
+      package_version: &str,
+      package_copy_index: u8,
+      registry_url: Option<String>,
+    ) -> Result<String, JsValue> {
+      let npm_url = match registry_url {
+        Some(registry_url) => {
+          let registry_url = Url::parse(registry_url.as_str())
+            .unwrap_or(Url::parse("https://registry.npmjs.org/").unwrap());
+          registry_url
+        }
+        None => RealSys
+          .env_var("NPM_URL")
+          .ok()
+          .and_then(|url| {
+            // ensure there is a trailing slash for the directory
+            let registry_url = format!("{}/", url.trim_end_matches('/'));
+            Url::parse(&registry_url).ok()
+          })
+          .unwrap_or_else(|| {
+            Url::parse("https://registry.npmjs.org/").unwrap()
+          }),
+      };
+
+      let package_folder = self
+        .cache
+        .package_folder_for_id(
+          package_name,
+          package_version,
+          package_copy_index,
+          &npm_url,
+        )
+        .to_string_lossy()
+        .to_string();
+
+      Ok(package_folder)
+    }
+  }
+
   fn get_headers<Cache: HttpCache>(
     cache: &Cache,
     url: &str,
